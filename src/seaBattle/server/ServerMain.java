@@ -4,24 +4,21 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
+import java.rmi.Naming;
+import java.rmi.RemoteException;
+import java.rmi.registry.LocateRegistry;
 import java.util.concurrent.ConcurrentHashMap;
 
 import seaBattle.gameLogic.GameSession;
 import seaBattle.gameLogic.Player.MoveResult;
 import seaBattle.protocol.Protocol;
-import seaBattle.protocol.cmd.CommandThread;
 import seaBattle.protocol.messages.Message;
 import seaBattle.protocol.messages.messages.MessageChallenge;
-import seaBattle.protocol.messages.messages.MessageConnect;
 import seaBattle.protocol.messages.messages.MessageUser;
 import seaBattle.protocol.messages.messagesRequest.MessageChallengeRequest;
-import seaBattle.protocol.messages.messagesRequest.MessageChallengeSuccesfullySend;
+import seaBattle.protocol.messages.messagesRequest.MessageChallengeSuccessfullySend;
 import seaBattle.protocol.messages.messagesRequest.MessageForfeit;
 import seaBattle.protocol.messages.messagesRequest.MessageGameStart;
 import seaBattle.protocol.messages.messagesRequest.MessageGetField;
@@ -32,69 +29,30 @@ import seaBattle.protocol.messages.messagesRequest.MessageReadyToPlay;
 import seaBattle.protocol.messages.messagesResponse.MessageChallengeResponse;
 import seaBattle.protocol.messages.messagesResponse.MessageGetFieldResult;
 import seaBattle.protocol.messages.messagesResult.MessageChallengeResult;
-import seaBattle.protocol.messages.messagesResult.MessageConnectResult;
 import seaBattle.protocol.messages.messagesResult.MessageError;
 import seaBattle.protocol.messages.messagesResult.MessageGameOver;
 import seaBattle.protocol.messages.messagesResult.MessageMoveResult;
 import seaBattle.protocol.messages.messagesResult.MessagePlaceShipsResult;
-import seaBattle.protocol.messages.messagesResult.MessagePong;
 import seaBattle.protocol.messages.messagesResult.MessageUserResult;
 
 public class ServerMain {
 
 	private static int MAX_USERS = 100;
 
-	public static void main(String[] args) {
-		try {
-			String ip = InetAddress.getLocalHost().getHostAddress();
-			System.out.println("Server IP: " + ip);
-			System.out.println("Server started on port: " + Protocol.PORT);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-
-		try (ServerSocket serv = new ServerSocket(Protocol.PORT)) {
-			ServerMain.log("SERVER", "Initialized");
-			ServerStopThread tester = new ServerStopThread();
-			tester.start();
-			while (true) {
-				Socket sock = accept(serv);
-				if (sock != null) {
-					if (ServerMain.getNumUsers() < ServerMain.MAX_USERS) {
-						ServerMain.log("CONNECT", sock.getInetAddress().getHostName() + " connected");
-						ServerClientHandler server = new ServerClientHandler(sock);
-						server.start();
-					} else {
-						ServerMain.log("CONNECT", sock.getInetAddress().getHostName() + " connection rejected");
-						sock.close();
-					}
-				}
-				if (ServerMain.getStopFlag()) {
-					break;
-				}
-			}
-		} catch (IOException e) {
-			System.err.println(e);
-		} finally {
-			stopAllUsers();
-			ServerMain.log("SERVER", "stopped");
-		}
-		try {
-			Thread.sleep(1000);
-		} catch (InterruptedException e) {
-		}
-	}
-
-	public static Socket accept(ServerSocket serv) {
-		assert (serv != null);
-		try {
-			serv.setSoTimeout(1000);
-			Socket sock = serv.accept();
-			return sock;
-		} catch (SocketException e) {
-		} catch (IOException e) {
-		}
-		return null;
+	public static void main(String[] args) throws RemoteException {
+        try {
+            SeaBattleServiceImpl serviceImpl = new SeaBattleServiceImpl();
+            String name = System.getProperty("servername", "FirstRemote");
+            LocateRegistry.createRegistry(Protocol.PORT);
+            Naming.rebind("SeaBattleService", serviceImpl);
+            ServerMain.log("SERVER",name + " is open and ready for customers.");
+        }
+        catch (Exception e) {
+            System.err.println(e);
+            System.err.println("Usage: java [-Dservername=<name>] " +
+		            "RemoteBankServer");
+            System.exit(1); // Force exit because there may be RMI threads
+        }
 	}
 
 	private static void stopAllUsers() {
@@ -276,72 +234,6 @@ public class ServerMain {
 	}
 }
 
-class ServerStopThread extends CommandThread {
-
-	static final String CMD_QUIT = "q";
-	static final String CMD_QUIT_LONG = "quit";
-
-	private final Scanner fin;
-
-	public ServerStopThread() {
-		fin = new Scanner(System.in);
-		ServerMain.setStopFlag(false);
-		putHandler(CMD_QUIT, CMD_QUIT_LONG, errorCode -> onCmdQuit());
-		this.setDaemon(true);
-		log("Admin console ready. Commands: users | sessions | challenges | info | quit");
-	}
-
-	@Override
-	public void run() {
-		while (true) {
-			try {
-				Thread.sleep(500);
-			} catch (InterruptedException e) {
-				break;
-			}
-
-			if (!fin.hasNextLine())
-				continue;
-			String cmd = fin.nextLine().trim().toLowerCase();
-			if (cmd.isEmpty())
-				continue;
-
-			switch (cmd) {
-				case "q":
-				case "quit":
-					if (onCmdQuit())
-						return;
-					break;
-				case "users":
-					ServerMain.printUsers();
-					break;
-				case "sessions":
-					ServerMain.printSessions();
-					break;
-				case "challenges":
-					ServerMain.printChallenges();
-					break;
-				case "info":
-					ServerMain.printServerInfo();
-					break;
-				default:
-					log("Unknown command: " + cmd);
-			}
-		}
-	}
-
-	public boolean onCmdQuit() {
-		log("Stopping server...");
-		fin.close();
-		ServerMain.setStopFlag(true);
-		return true;
-	}
-
-	private void log(String msg) {
-		System.out.printf("[%tT] [ADMIN] %s%n", System.currentTimeMillis(), msg);
-	}
-}
-
 class ServerClientHandler extends Thread {
 
 	private Socket sock;
@@ -386,76 +278,6 @@ class ServerClientHandler extends Thread {
 				if (msg != null)
 					switch (msg.getID()) {
 
-						case Protocol.CMD_PING:
-							os.writeObject(new MessagePong());
-							break;
-
-						case Protocol.CMD_CONNECT:
-							if (!connect((MessageConnect) msg))
-								return;
-							break;
-
-						case Protocol.CMD_DISCONNECT:
-							synchronized (ServerMain.syncChallenges) {
-								List<Long> challengesToRemove = new ArrayList<>();
-								for (Challenge challenge : ServerMain.challenges.values()) {
-									if (challenge.getFromNic().equals(userNic)
-											|| challenge.getToNic().equals(userNic)) {
-										challengesToRemove.add(challenge.getId());
-
-										// Уведомляем другую сторону о отмене вызова
-										String otherUser = challenge.getFromNic().equals(userNic) ? challenge.getToNic()
-												: challenge.getFromNic();
-										ServerClientHandler otherHandler = ServerMain.getUser(otherUser);
-										if (otherHandler != null) {
-											otherHandler.sendMessage(
-													new MessageError("Challenge cancelled - user disconnected"));
-										}
-									}
-								}
-								for (Long challengeId : challengesToRemove) {
-									ServerMain.removeChallenge(challengeId);
-								}
-							}
-							synchronized (ServerMain.syncSession) {
-								List<Long> sessionsToRemove = new ArrayList<>();
-								for (GameSession gameSession : ServerMain.gameSessions.values()) {
-									if (gameSession.getPlayerA().getNic().equals(userNic) ||
-											gameSession.getPlayerB().getNic().equals(userNic)) {
-
-										sessionsToRemove.add(gameSession.getSessionId());
-
-										String opponentNic = gameSession.getEnemyNic(userNic);
-										ServerClientHandler opponentHandler = ServerMain.getUser(opponentNic);
-										if (opponentHandler != null) {
-											opponentHandler.sendMessage(new MessageGameOver(
-													true,
-													"Opponent disconnected - you win!",
-													gameSession.getSessionId(),
-													opponentNic));
-
-											// Также отправляем сообщение об ошибке для информации
-											opponentHandler.sendMessage(new MessageError(
-													"Your opponent has disconnected from the game"));
-										}
-
-										// Завершаем игровую сессию
-										gameSession.gameEnd();
-									}
-								}
-								for (Long sessionId : sessionsToRemove) {
-									ServerMain.setSession(sessionId, null);
-								}
-							}
-							//unregister();
-							
-							ServerMain.log("DISCONNECT", "User " + userNic + " fully disconnected");
-							return;
-
-						case Protocol.CMD_USER:
-							user((MessageUser) msg);
-							break;
-
 						case Protocol.CMD_CHALLENGE:
 							MessageChallenge challenge = (MessageChallenge) msg;
 							ServerClientHandler target = ServerMain.getUser(challenge.getToNic());
@@ -464,7 +286,7 @@ class ServerClientHandler extends Thread {
 								Challenge ch = new Challenge(cid, userNic, challenge.getToNic());
 								ServerMain.registerChallenge(ch);
 								String from = challenge.getFromNic();
-								os.writeObject(new MessageChallengeSuccesfullySend(from, cid));
+								os.writeObject(new MessageChallengeSuccessfullySend(from, cid));
 								target.sendMessage(new MessageChallengeRequest(userNic, cid));
 								ServerMain.log("CHALLENGE",
 										"Created: " + cid + " " + userNic + " - " + challenge.getToNic());
@@ -607,28 +429,6 @@ class ServerClientHandler extends Thread {
 		} catch (IOException e) {
 			ServerMain.log("MESSAGE", "Error sending to " + userNic + ": " + e.getMessage());
 		}
-	}
-
-	boolean connect(MessageConnect msg) throws IOException {
-
-		ServerClientHandler old = register(msg.getNic(), msg.getFullName());
-		if (old == null) {
-			os.writeObject(new MessageConnectResult());
-			return true;
-		} else {
-			os.writeObject(
-					new MessageConnectResult(false, "User " + old.userFullName + " already connected as " + userNic));
-			return false;
-		}
-	}
-
-	void user(MessageUser msg) throws IOException {
-
-		String[] nics = ServerMain.getUsers();
-		if (nics != null)
-			os.writeObject(new MessageUserResult(nics));
-		else
-			os.writeObject(new MessageUserResult(false, "Unable to get users list", null));
 	}
 
 	private boolean disconnected = false;
