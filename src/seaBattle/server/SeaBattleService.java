@@ -23,7 +23,7 @@ public interface SeaBattleService extends Remote {
 
     MessagePlaceShipsResult placeShips(MessagePlaceShips req) throws RemoteException;
 
-    MessageOpponentReady readyToPlay(MessageReadyToPlay req) throws RemoteException;
+    MessageReadyToPlay readyToPlay(MessageReadyToPlay req) throws RemoteException;
 
     MessageMoveResult move(MessageMove req) throws RemoteException;
     MessageGetFieldResult getField(MessageGetField req) throws RemoteException;

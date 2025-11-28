@@ -2,6 +2,7 @@ package seaBattle.server;
 
 import seaBattle.client.ClientCallback;
 import seaBattle.gameLogic.GameSession;
+import seaBattle.gameLogic.Player;
 import seaBattle.protocol.messages.messages.*;
 import seaBattle.protocol.messages.messagesRequest.*;
 import seaBattle.protocol.messages.messagesResponse.MessageChallengeResponse;
@@ -134,31 +135,143 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
 
     @Override
     public MessageChallengeResult answerChallenge(MessageChallengeResponse resp) throws RemoteException {
-        return null;
+        long challengeID = resp.getChallengeId();
+        boolean accepted = resp.getAccepted();
+
+        Challenge challenge = challenges.get(challengeID);
+        if (challenge == null) {
+            return new MessageChallengeResult(false, "Challenge not found", -1);
+        }
+
+        String from = challenge.getFromNic();
+        String to = challenge.getToNic();
+
+        ClientCallback cbTo = callbacks.get(to);
+        ClientCallback cbFrom = callbacks.get(from);
+
+        if (cbFrom == null) {
+            cbTo.onError(new MessageError("Initiator not found"));
+        }
+
+        challenges.remove(challengeID);
+
+        if (!accepted) {
+            cbFrom.onError(new MessageError("Challenge not accepted"));
+            return new MessageChallengeResult(true, "Challenge not accepted", challengeId);
+        }
+
+        long sessionID = getNextSessionId();
+        GameSession gameSession = new GameSession(sessionID, from, to, null, null);
+        sessions.put(challengeID, gameSession);
+
+        log("GAME SESSION", "Started: " + sessionID);
+
+        if (cbFrom != null) {
+            cbFrom.onGameStart(new MessageGameStart("Server", sessionID, to, true));
+        }
+
+        if (cbTo != null) {
+            cbTo.onGameStart(new MessageGameStart("Server", sessionID, from, false));
+        }
+
+        return new MessageChallengeResult(true, "Accepted", challengeId);
     }
 
     @Override
     public MessagePlaceShipsResult placeShips(MessagePlaceShips req) throws RemoteException {
-        return null;
+        long sessionID = req.getSessionId();
+        GameSession gameSession = sessions.get(sessionID);
+
+        if (gameSession == null) {
+            return new MessagePlaceShipsResult(false, "GameSession not found");
+        }
+
+        boolean successful = gameSession.setPlaceShip(req.getFrom(), req.getShips());
+        return new MessagePlaceShipsResult(successful, "Success");
     }
 
     @Override
-    public MessageOpponentReady readyToPlay(MessageReadyToPlay req) throws RemoteException {
+    public MessageReadyToPlay readyToPlay(MessageReadyToPlay req) throws RemoteException {
+        long sessionID = req.getSessionId();
+        GameSession gameSession = sessions.get(sessionID);
+
+        String currentPlayer = req.getFrom();
+        String enemyNic = gameSession.getEnemyNic(currentPlayer);
+
+        ClientCallback enemyCallback = callbacks.get(enemyNic);
+        if (enemyCallback != null) {
+            enemyCallback.onOpponentReadyToPlay(new MessageOpponentReady(currentPlayer, sessionID));
+        }
+
+        boolean start = gameSession.playerReady(currentPlayer);
+        if (start) {
+            if (enemyCallback != null) {
+                enemyCallback.onReadyToPlay(new MessageReadyToPlay(gameSession.getToStart(), sessionID));
+            }
+            return new MessageReadyToPlay(gameSession.getToStart(), sessionID);
+        }
         return null;
     }
 
     @Override
     public MessageMoveResult move(MessageMove req) throws RemoteException {
+        long sessionID = req.getSessionId();
+        GameSession gameSession = sessions.get(sessionID);
+        try {
+            Player.MoveResult res = gameSession.move(req.getFrom(), req.getX(), req.getY());
+
+            String currentPlayer = req.getFrom();
+            String enemyNic = gameSession.getEnemyNic(currentPlayer);
+            ClientCallback enemyCallback = callbacks.get(enemyNic);
+
+            if (!res.gameOver) {
+                if (enemyCallback != null) {
+                    enemyCallback.onMoveResult(new MessageMoveResult(true, currentPlayer + " move done", sessionID, req.getX(), req.getY(), res.hitted, res.sunked, res.gameOver, res.field, false));
+                }
+            }
+            else {
+                if (enemyCallback != null) {
+                    enemyCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, currentPlayer));
+                }
+                ClientCallback playerCallback = callbacks.get(currentPlayer);
+                if (playerCallback != null) {
+                    playerCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, currentPlayer));
+                }
+            }
+            return new MessageMoveResult(true, currentPlayer + " move done", sessionID, req.getX(), req.getY(), res.hitted, res.sunked, res.gameOver, res.field, true);
+        }
+        catch (IllegalStateException e) {
+            ClientCallback playerCallback = callbacks.get(req.getFrom());
+            if (playerCallback != null) {
+                playerCallback.onError(new MessageError("Not your turn, wait for opponent!"));
+            }
+        }
         return null;
     }
 
     @Override
     public MessageGetFieldResult getField(MessageGetField req) throws RemoteException {
-        return null;
+        long sessionID = req.getSessionId();
+        GameSession gameSession = sessions.get(sessionID);
+
+        int[][] field = gameSession.getField(req.getFrom());
+        return new MessageGetFieldResult(field);
     }
 
     @Override
     public MessageGameOver forfeit(MessageForfeit req) throws RemoteException {
-        return null;
+        long sessionID = req.getSessionId();
+        GameSession gameSession = sessions.get(sessionID);
+
+        gameSession.gameEnd();
+
+        String currentPlayer = req.getFrom();
+        String enemyNic = gameSession.getEnemyNic(currentPlayer);
+        ClientCallback enemyCallback = callbacks.get(enemyNic);
+
+        if (enemyCallback != null) {
+            enemyCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, enemyNic));
+        }
+        return new MessageGameOver(true, "Game over", sessionID, enemyNic);
     }
 }

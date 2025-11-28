@@ -2,6 +2,7 @@ package seaBattle.client;
 
 import seaBattle.protocol.messages.messagesRequest.MessageChallengeRequest;
 import seaBattle.protocol.messages.messagesRequest.MessageGameStart;
+import seaBattle.protocol.messages.messagesRequest.MessageOpponentReady;
 import seaBattle.protocol.messages.messagesRequest.MessageReadyToPlay;
 import seaBattle.protocol.messages.messagesResult.MessageError;
 import seaBattle.protocol.messages.messagesResult.MessageGameOver;
@@ -19,7 +20,7 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
 
     @Override
     public void onChallengeRequest(MessageChallengeRequest request) throws RemoteException {
-        clientMain.onChallengeRequest(request);
+        // clientMain.onChallengeRequest(request);
     }
 
     @Override
@@ -44,6 +45,11 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
 
     @Override
     public void onReadyToPlay(MessageReadyToPlay messageReadyToPlay) throws RemoteException {
+
+    }
+
+    @Override
+    public void onOpponentReadyToPlay(MessageOpponentReady messageReadyToPlay) throws RemoteException {
 
     }
 }

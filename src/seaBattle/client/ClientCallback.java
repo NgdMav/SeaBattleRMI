@@ -2,6 +2,7 @@ package seaBattle.client;
 
 import seaBattle.protocol.messages.messagesRequest.MessageChallengeRequest;
 import seaBattle.protocol.messages.messagesRequest.MessageGameStart;
+import seaBattle.protocol.messages.messagesRequest.MessageOpponentReady;
 import seaBattle.protocol.messages.messagesRequest.MessageReadyToPlay;
 import seaBattle.protocol.messages.messagesResult.MessageError;
 import seaBattle.protocol.messages.messagesResult.MessageGameOver;
@@ -17,4 +18,5 @@ public interface ClientCallback extends Remote {
     void onGameOver(MessageGameOver messageGameOver) throws RemoteException;
     void onError(MessageError messageError) throws RemoteException;
     void onReadyToPlay(MessageReadyToPlay messageReadyToPlay) throws RemoteException;
+    void onOpponentReadyToPlay(MessageOpponentReady messageReadyToPlay) throws RemoteException;
 }
