@@ -44,7 +44,7 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
     }
 
     @Override
-    public MessageConnectResult connect(MessageConnect req) throws RemoteException {
+    public synchronized MessageConnectResult connect(MessageConnect req) throws RemoteException {
         String nic = req.getNic();
 
         if (nic == null) {
@@ -64,7 +64,7 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
     }
 
     @Override
-    public MessageError disconnect(MessageDisconnect req) throws RemoteException {
+    public synchronized MessageError disconnect(MessageDisconnect req) throws RemoteException {
         String nic = req.getFrom();
 
         users.remove(nic);
@@ -107,12 +107,12 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
     }
 
     @Override
-    public MessageUserResult userList(MessageUser req) throws RemoteException {
+    public synchronized MessageUserResult userList(MessageUser req) throws RemoteException {
         return new MessageUserResult(users.keySet().toArray(new String[0]));
     }
 
     @Override
-    public MessageChallengeSuccessfullySend createChallenge(MessageChallenge req) throws RemoteException {
+    public synchronized MessageChallengeSuccessfullySend createChallenge(MessageChallenge req) throws RemoteException {
 
         String from = req.getFromNic();
         String to = req.getToNic();
@@ -134,7 +134,7 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
     }
 
     @Override
-    public MessageChallengeResult answerChallenge(MessageChallengeResponse resp) throws RemoteException {
+    public synchronized MessageChallengeResult answerChallenge(MessageChallengeResponse resp) throws RemoteException {
         long challengeID = resp.getChallengeId();
         boolean accepted = resp.getAccepted();
 
@@ -156,13 +156,14 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
         challenges.remove(challengeID);
 
         if (!accepted) {
+            assert cbFrom != null;
             cbFrom.onError(new MessageError("Challenge not accepted"));
-            return new MessageChallengeResult(true, "Challenge not accepted", challengeId);
+            return new MessageChallengeResult(true, "Challenge not accepted", challengeID);
         }
 
         long sessionID = getNextSessionId();
         GameSession gameSession = new GameSession(sessionID, from, to, null, null);
-        sessions.put(challengeID, gameSession);
+        sessions.put(sessionID, gameSession);
 
         log("GAME SESSION", "Started: " + sessionID);
 
@@ -174,104 +175,174 @@ public class SeaBattleServiceImpl extends UnicastRemoteObject  implements SeaBat
             cbTo.onGameStart(new MessageGameStart("Server", sessionID, from, false));
         }
 
-        return new MessageChallengeResult(true, "Accepted", challengeId);
+        return new MessageChallengeResult(true, "Accepted", challengeID);
     }
 
     @Override
-    public MessagePlaceShipsResult placeShips(MessagePlaceShips req) throws RemoteException {
+    public synchronized MessagePlaceShipsResult placeShips(MessagePlaceShips req) throws RemoteException {
         long sessionID = req.getSessionId();
         GameSession gameSession = sessions.get(sessionID);
+
+        boolean successful;
 
         if (gameSession == null) {
             return new MessagePlaceShipsResult(false, "GameSession not found");
         }
-
-        boolean successful = gameSession.setPlaceShip(req.getFrom(), req.getShips());
+        synchronized (gameSession) {
+            successful = gameSession.setPlaceShip(req.getFrom(), req.getShips());
+        }
         return new MessagePlaceShipsResult(successful, "Success");
     }
 
     @Override
-    public MessageReadyToPlay readyToPlay(MessageReadyToPlay req) throws RemoteException {
+    public synchronized MessageReadyToPlay readyToPlay(MessageReadyToPlay req) throws RemoteException {
         long sessionID = req.getSessionId();
         GameSession gameSession = sessions.get(sessionID);
 
-        String currentPlayer = req.getFrom();
-        String enemyNic = gameSession.getEnemyNic(currentPlayer);
-
-        ClientCallback enemyCallback = callbacks.get(enemyNic);
-        if (enemyCallback != null) {
-            enemyCallback.onOpponentReadyToPlay(new MessageOpponentReady(currentPlayer, sessionID));
-        }
-
-        boolean start = gameSession.playerReady(currentPlayer);
-        if (start) {
-            if (enemyCallback != null) {
-                enemyCallback.onReadyToPlay(new MessageReadyToPlay(gameSession.getToStart(), sessionID));
-            }
-            return new MessageReadyToPlay(gameSession.getToStart(), sessionID);
-        }
-        return null;
-    }
-
-    @Override
-    public MessageMoveResult move(MessageMove req) throws RemoteException {
-        long sessionID = req.getSessionId();
-        GameSession gameSession = sessions.get(sessionID);
-        try {
-            Player.MoveResult res = gameSession.move(req.getFrom(), req.getX(), req.getY());
-
+        synchronized (gameSession) {
             String currentPlayer = req.getFrom();
             String enemyNic = gameSession.getEnemyNic(currentPlayer);
-            ClientCallback enemyCallback = callbacks.get(enemyNic);
 
-            if (!res.gameOver) {
-                if (enemyCallback != null) {
-                    enemyCallback.onMoveResult(new MessageMoveResult(true, currentPlayer + " move done", sessionID, req.getX(), req.getY(), res.hitted, res.sunked, res.gameOver, res.field, false));
-                }
+            ClientCallback enemyCallback = callbacks.get(enemyNic);
+            if (enemyCallback != null) {
+                enemyCallback.onOpponentReadyToPlay(new MessageOpponentReady(currentPlayer, sessionID));
             }
-            else {
+
+            boolean start = gameSession.playerReady(currentPlayer);
+            if (start) {
                 if (enemyCallback != null) {
-                    enemyCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, currentPlayer));
+                    enemyCallback.onReadyToPlay(new MessageReadyToPlay(gameSession.getToStart(), sessionID));
                 }
-                ClientCallback playerCallback = callbacks.get(currentPlayer);
-                if (playerCallback != null) {
-                    playerCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, currentPlayer));
-                }
-            }
-            return new MessageMoveResult(true, currentPlayer + " move done", sessionID, req.getX(), req.getY(), res.hitted, res.sunked, res.gameOver, res.field, true);
-        }
-        catch (IllegalStateException e) {
-            ClientCallback playerCallback = callbacks.get(req.getFrom());
-            if (playerCallback != null) {
-                playerCallback.onError(new MessageError("Not your turn, wait for opponent!"));
+                return new MessageReadyToPlay(gameSession.getToStart(), sessionID);
             }
         }
         return null;
     }
 
     @Override
-    public MessageGetFieldResult getField(MessageGetField req) throws RemoteException {
+    public synchronized MessageMoveResult move(MessageMove req) throws RemoteException {
+        long sessionID = req.getSessionId();
+        GameSession gameSession = sessions.get(sessionID);
+        synchronized (gameSession) {
+            try {
+                Player.MoveResult res = gameSession.move(req.getFrom(), req.getX(), req.getY());
+
+                String currentPlayer = req.getFrom();
+                String enemyNic = gameSession.getEnemyNic(currentPlayer);
+                ClientCallback enemyCallback = callbacks.get(enemyNic);
+
+                if (!res.gameOver) {
+                    if (enemyCallback != null) {
+                        enemyCallback.onMoveResult(new MessageMoveResult(true, currentPlayer + " move done", sessionID, req.getX(), req.getY(), res.hitted, res.sunked, res.gameOver, res.field, false));
+                    }
+                } else {
+                    if (enemyCallback != null) {
+                        enemyCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, currentPlayer));
+                    }
+                    ClientCallback playerCallback = callbacks.get(currentPlayer);
+                    if (playerCallback != null) {
+                        playerCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, currentPlayer));
+                    }
+                }
+                return new MessageMoveResult(true, currentPlayer + " move done", sessionID, req.getX(), req.getY(), res.hitted, res.sunked, res.gameOver, res.field, true);
+            } catch (IllegalStateException e) {
+                ClientCallback playerCallback = callbacks.get(req.getFrom());
+                if (playerCallback != null) {
+                    playerCallback.onError(new MessageError("Not your turn, wait for opponent!"));
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public synchronized MessageGetFieldResult getField(MessageGetField req) throws RemoteException {
         long sessionID = req.getSessionId();
         GameSession gameSession = sessions.get(sessionID);
 
-        int[][] field = gameSession.getField(req.getFrom());
+        int[][] field;
+        synchronized (gameSession) {
+            field = gameSession.getField(req.getFrom());
+        }
         return new MessageGetFieldResult(field);
     }
 
     @Override
-    public MessageGameOver forfeit(MessageForfeit req) throws RemoteException {
+    public synchronized MessageGameOver forfeit(MessageForfeit req) throws RemoteException {
         long sessionID = req.getSessionId();
         GameSession gameSession = sessions.get(sessionID);
 
-        gameSession.gameEnd();
+        String enemyNic;
+        synchronized (gameSession) {
+            gameSession.gameEnd();
 
-        String currentPlayer = req.getFrom();
-        String enemyNic = gameSession.getEnemyNic(currentPlayer);
-        ClientCallback enemyCallback = callbacks.get(enemyNic);
+            String currentPlayer = req.getFrom();
+            enemyNic = gameSession.getEnemyNic(currentPlayer);
+            ClientCallback enemyCallback = callbacks.get(enemyNic);
 
-        if (enemyCallback != null) {
-            enemyCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, enemyNic));
+            if (enemyCallback != null) {
+                enemyCallback.onGameOver(new MessageGameOver(true, "Game over", sessionID, enemyNic));
+            }
         }
         return new MessageGameOver(true, "Game over", sessionID, enemyNic);
+    }
+
+    public void setStopFlag(boolean b) {
+        if (b) {
+            log("ADMIN", "Server is shutting down...");
+
+            for (GameSession gs : sessions.values()) {
+                gs.gameEnd();
+            }
+            sessions.clear();
+
+            for (Map.Entry<String, ClientCallback> e : callbacks.entrySet()) {
+                try {
+                    e.getValue().onError(new MessageError("SERVER SHUTDOWN"));
+                } catch (Exception ignore) {}
+            }
+
+            callbacks.clear();
+            users.clear();
+            challenges.clear();
+
+            log("ADMIN", "All sessions closed, all users disconnected");
+        }
+    }
+
+    public void printUsers() {
+        System.out.println("\n===== USERS (" + users.size() + ") =====");
+        for (Map.Entry<String, String> e : users.entrySet()) {
+            System.out.println(" • " + e.getKey() + " (" + e.getValue() + ")");
+        }
+        System.out.println("=====================================\n");
+    }
+
+    public void printSessions() {
+        System.out.println("\n===== SESSIONS (" + sessions.size() + ") =====");
+        for (GameSession gs : sessions.values()) {
+            System.out.println(" • SessionID = " + gs.getSessionId()
+                    + " | " + gs.getPlayerA().getNic()
+                    + " vs " + gs.getPlayerB().getNic());
+        }
+        System.out.println("=======================================\n");
+    }
+
+    public void printChallenges() {
+        System.out.println("\n===== CHALLENGES (" + challenges.size() + ") =====");
+        for (Challenge ch : challenges.values()) {
+            System.out.println(" • ID = " + ch.getId()
+                    + " | " + ch.getFromNic()
+                    + " -> " + ch.getToNic());
+        }
+        System.out.println("========================================\n");
+    }
+
+    public void printServerInfo() {
+        System.out.println("\n===== SERVER INFO =====");
+        System.out.println("Users:      " + users.size());
+        System.out.println("Sessions:   " + sessions.size());
+        System.out.println("Challenges: " + challenges.size());
+        System.out.println("========================\n");
     }
 }

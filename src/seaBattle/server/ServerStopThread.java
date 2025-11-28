@@ -1,7 +1,6 @@
 package seaBattle.server;
 
 import seaBattle.protocol.cmd.CommandThread;
-import seaBattle.server.ServerMain;
 
 import java.util.Scanner;
 

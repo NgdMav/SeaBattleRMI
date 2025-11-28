@@ -32,7 +32,7 @@ interface RESULT {
 }
 
 interface PORT {
-	static final int PORT = 4242;
+	static final int PORT = 1099;
 }
 
 public class Protocol implements CMD, RESULT, PORT {
