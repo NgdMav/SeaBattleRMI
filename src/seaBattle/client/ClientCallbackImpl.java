@@ -51,6 +51,6 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
 
     @Override
     public void onOpponentReadyToPlay(MessageOpponentReady messageReadyToPlay) throws RemoteException {
-        clientMain.onOpponentReady(messageReadyToPlay);
+        clientMain.onOpponentReadyToPlay(messageReadyToPlay);
     }
 }

@@ -13,11 +13,11 @@ public class ServerMain {
 	public static void main(String[] args) {
         try {
             serviceImpl = new SeaBattleServiceImpl();
-            String name = System.getProperty("servername", "SeaBattleService");
+            String name = "SeaBattleService";
 
             LocateRegistry.createRegistry(Protocol.PORT);
 
-            Naming.rebind("SeaBattleService", serviceImpl);
+            Naming.rebind(name, serviceImpl);
 
             ServerMain.log("SERVER",name + " is open and ready for customers.");
 

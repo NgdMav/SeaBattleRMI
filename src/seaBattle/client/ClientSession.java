@@ -56,7 +56,7 @@ public class ClientSession {
 
         printField(field);
 
-        ses.yourTurn = !hit; // hit → move again
+        ses.yourTurn = !hit;
         if (ses.yourTurn)
             System.out.println("Your turn (type 'move')");
         else
