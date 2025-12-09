@@ -1,10 +1,9 @@
 package seaBattle.client;
 
-import seaBattle.gameLogic.Ship;
-import seaBattle.protocol.messages.messagesResult.MessageMoveResult;
-
 import java.util.ArrayList;
 import java.util.List;
+import seaBattle.gameLogic.Ship;
+import seaBattle.protocol.messages.messagesResult.MessageMoveResult;
 
 public class ClientSession {
     public boolean connected = false;
@@ -35,8 +34,6 @@ public class ClientSession {
         playerReady = false;
         yourTurn = false;
     }
-
-    // === METHODS MOVED FROM OLD CLIENT ===
 
     public static void printMove(MessageMoveResult msg, ClientSession ses) {
         int x = msg.getX();
